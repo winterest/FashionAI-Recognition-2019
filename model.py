@@ -20,6 +20,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=0)
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--net', default='IncepV3', help='base nets')
+parser.add_argument('--bs', type=int, default=16, help='batch size')
 
 opt = parser.parse_args()
 print(opt)
@@ -111,7 +112,6 @@ class DataGenerator(keras.utils.Sequence):
             X[0] = tf.image.flip_left_right(X[0])
         angle = np.random.random()*20/57.3
         X[0] = tf.contrib.image.rotate(X[0],angle)
-        print(X[0])
         with tf.Session() as sess:
             X[0] = sess.run(X[0])
         return X, y
@@ -183,7 +183,7 @@ with tf.device('/device:'+device_str):
 
 EPOCHS = 150
 INIT_LR = 1e-2
-BS = 16 
+BS = opt.bs
 #adm = Adam(lr=INIT_LR, decay=INIT_LR / EPOCHS)
 sgd = optimizers.SGD(lr=0.0005, decay=1e-6, momentum=0.9, nesterov=True)
 loss = "categorical_crossentropy"
@@ -206,7 +206,7 @@ callbacks_list = [checkpoint]
 # Fit the model
 #model.fit(X, Y, validation_split=0.33, epochs=150, batch_size=10, callbacks=callbacks_list, verbose=0)
 
-training_generator = DataGenerator(partition[:75000],BS)
-validation_generator = DataGenerator(partition[75000:])
+training_generator = DataGenerator(partition[:170000],BS)
+validation_generator = DataGenerator(partition[170000:])
 my_model.fit_generator(generator=training_generator,validation_data=validation_generator,shuffle=True,verbose=1,
                        use_multiprocessing=True,epochs=EPOCHS,callbacks=callbacks_list,workers=opt.workers)
