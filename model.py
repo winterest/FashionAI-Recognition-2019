@@ -1,38 +1,48 @@
 import tensorflow as tf
-import matplotlib.pyplot as plt
+import argparse
 import numpy as np
-import pandas as pd
-import cv2
+#import matplotlib.pyplot as plt
+#import pandas as pd
+#import cv2
 import math
 from glob import glob
 import os
 import keras
+from keras import optimizers, losses
 
-from keras.applications.vgg16 import VGG16
+from keras.applications.vgg16 import VGG16, preprocess_input
 from keras.applications.inception_v3 import InceptionV3
-
 from keras.preprocessing import image
-from keras.applications.vgg16 import preprocess_input
 from keras.layers import Input, Flatten, Dense, multiply, Softmax,GlobalAveragePooling2D
 from keras.models import Model
-
-from keras import optimizers
 from keras.optimizers import Adam
+parser = argparse.ArgumentParser()
+parser.add_argument('--workers', type=int, help='number of data loading workers', default=0)
+parser.add_argument('--cuda', action='store_true', help='enables cuda')
+parser.add_argument('--net', default='IncepV3', help='base nets')
 
-from keras import losses
-
+opt = parser.parse_args()
+print(opt)
+if opt.cuda:
+    device_str = "GPU:0"        
+else:
+    device_str = "CPU:0"
 print("TF version is:   ",tf.__version__)
 
-file = open('data/fashionAI_attributes_train1/Annotations/label.csv','r')
+file_1 = open('data/fashionAI_attributes_train1/Annotations/label.csv','r')
+file_2 = open('data/fashionAI_attributes_train2/Annotations/label.csv','r')
 
 paths = []
 category = []
 label = []
-for line in file:
-    #print(line)
-    #print(line.split(','))
+for line in file_1:
     t = line.split(',')
     paths.append('data/fashionAI_attributes_train1/'+t[0])
+    category.append(t[1])
+    label.append(t[2][:-1])
+for line in file_2:
+    t = line.split(',')
+    paths.append('data/fashionAI_attributes_train2/'+t[0])
     category.append(t[1])
     label.append(t[2][:-1])
 
@@ -48,9 +58,15 @@ def label_to_array(llabel):
 
 def get_img(index):
     img_path = paths[index]
-    img = image.load_img(img_path, target_size=(224,224))
+    img = image.load_img(img_path, target_size=(260,260))
     x_ = image.img_to_array(img)
+    #### random Crop
+    start_i = np.random.randint(36)
+    start_j = np.random.randint(36)    
+    x_ = x_[start_i:start_i+224,start_j:start_j+224,:]    
+    
     x_ = np.expand_dims(x_, axis=0)
+
     x_ = preprocess_input(x_)    # gives an array in shape of (1,224,224,3)
     label_ = label_to_array(label[index])
     cat_ = categories.index(category[index])
@@ -89,7 +105,15 @@ class DataGenerator(keras.utils.Sequence):
 
         # Generate data
         X, y = self.__data_generation(list_IDs_temp)
-
+        X[0] = tf.cast(X[0], tf.float32)
+        if np.random.random()>0.5:
+            #with sess.as_default():
+            X[0] = tf.image.flip_left_right(X[0])
+        angle = np.random.random()*20/57.3
+        X[0] = tf.contrib.image.rotate(X[0],angle)
+        print(X[0])
+        with tf.Session() as sess:
+            X[0] = sess.run(X[0])
         return X, y
 
     def on_epoch_end(self):
@@ -118,10 +142,8 @@ class DataGenerator(keras.utils.Sequence):
 
         return [X_img,X_cat], y_label #keras.utils.to_categorical(y, num_classes=self.n_classes)
 
-cfg_base_model = 'incepV3'
-
-with tf.device('/device:GPU:1'):
-  if cfg_base_model=='VGG16':
+with tf.device('/device:'+device_str):
+  if opt.net=='VGG16':
     vgg_head = VGG16(weights='imagenet',include_top=False)
     vgg_head.name = 'vgg16_head'
     
@@ -138,7 +160,7 @@ with tf.device('/device:GPU:1'):
     x = Softmax(80)(x)
     my_model = Model(inputs=[img_input, cat_input], output=x)
     
-  if cfg_base_model=='incepV3':
+  if opt.net=='IncepV3':
     # create the base pre-trained model
     base_model = InceptionV3(weights='imagenet', include_top=False)
     base_model.name = 'InceptionV3_head'
@@ -187,5 +209,4 @@ callbacks_list = [checkpoint]
 training_generator = DataGenerator(partition[:75000],BS)
 validation_generator = DataGenerator(partition[75000:])
 my_model.fit_generator(generator=training_generator,validation_data=validation_generator,shuffle=True,verbose=1,
-                       use_multiprocessing=True,epochs=EPOCHS,callbacks=callbacks_list,
-                       workers=0)
+                       use_multiprocessing=True,epochs=EPOCHS,callbacks=callbacks_list,workers=opt.workers)
